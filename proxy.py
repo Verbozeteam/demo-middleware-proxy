@@ -4,9 +4,23 @@ import logging
 import json
 from websocket_server import WebsocketServer
 from threading import Lock
+import sys, os
+from functools import reduce
+import netifaces
+
+import time, random, signal
 
 ALL_CLIENTS = {}
 GLOBAL_LOCK = Lock()
+MIDDLEWARE_ROOM_ID = json.load('../middleware/blueprint.json')["id"]
+
+LOCAL_IPS = ['localhost', '0.0.0.0']
+ifaces = []
+for i in netifaces.interfaces():
+	try:
+		ip = netifaces.ifaddresses(i)[netifaces.AF_INET][0]['addr']
+		LOCAL_IPS.append(ip)
+	except: pass
 
 def new_client(client, server):
 	global ALL_CLIENTS, GLOBAL_LOCK
@@ -31,14 +45,15 @@ def client_left(client, server):
 		GLOBAL_LOCK.release()
 
 def on_message(client, server, message):
-	global ALL_CLIENTS, GLOBAL_LOCK
+	global ALL_CLIENTS, GLOBAL_LOCK, MIDDLEWARE_ROOM_ID, LOCAL_IPS
 	GLOBAL_LOCK.acquire()
 	try:
-		if '127.0.0.1' not in client["address"][0] and 'localhost' not in client["address"][0] and '0.0.0.0' not in client["address"][0] and '192.168.10.102' not in client["address"][0]:
+		if reduce(lambda a,b: a and b, map(lambda ip: ip not in client["address"][0], LOCAL_IPS)): # if the client address is not local (that is, not the aggregator running on this same pi)
+			# add a target room id to it as if it came from www.verboze.com going to the aggregator
 			message = json.loads(message)
-			message["__room_id"] = "1"
+			message["__room_id"] = MIDDLEWARE_ROOM_ID
 			message = json.dumps(message)
-		#print ("PROXY: [{}]: {}".format(client["id"], message))
+		# forward the message to all others
 		for clid in list(ALL_CLIENTS.keys()):
 			if clid != client["id"]:
 				server.send_message(ALL_CLIENTS[clid], message)
